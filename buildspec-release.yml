@@ -1,0 +1,50 @@
+version: 0.2
+
+phases:
+  install:
+    commands:
+      # install openjdk-8
+      - apt-get update
+      - apt-get -y install openjdk-8-jdk
+      - update-java-alternatives -s java-1.8.0-openjdk-amd64
+      - export JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64/bin
+
+      # install sbt launcher
+      - curl -LO https://github.com/sbt/sbt/releases/download/v1.7.1/sbt-1.7.1.tgz
+      - tar -xf sbt-*.tgz
+      - export PATH=$CODEBUILD_SRC_DIR/sbt/bin/:$PATH
+      - cd $CODEBUILD_SRC_DIR/sagemaker-spark-sdk
+      - sbt -Dsbt.log.noformat=true sbtVersion scalaVersion
+
+  build:
+    commands:
+      - export SBT_OPTS="-Xms1024M -Xmx4G -Xss2M -XX:MaxMetaspaceSize=2G"
+
+      # prepare the release (update versions, changelog etc.)
+      - git-release --prepare
+
+      # spark unit tests and package (no coverage)
+      - cd $CODEBUILD_SRC_DIR/sagemaker-spark-sdk
+      - sbt -Dsbt.log.noformat=true clean test package
+
+      # pyspark linters, package and doc build tests
+      - cd $CODEBUILD_SRC_DIR/sagemaker-pyspark-sdk
+      - tox -e flake8,twine,sphinx
+
+      # pyspark unit tests (no coverage)
+      - tox -e py38 -- tests/
+
+      # todo consider adding subset of integration tests
+
+      # generate the python distribution package
+      - python3 setup.py sdist
+
+      # publish the release to github
+      - git-release --publish
+
+artifacts:
+  files:
+    - sagemaker-pyspark-sdk/dist/sagemaker_pyspark-*.tar.gz
+    - sagemaker-spark-sdk/**/*
+    - VERSION
+  name: ARTIFACT_1
